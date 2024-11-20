@@ -1,0 +1,251 @@
+---
+title: "Primary_Rating_Analysis"
+author: "Niklas"
+date: "2024-10-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(dev = "png" ,echo = TRUE)
+```
+
+## Primary Rating Analysis
+
+Here I will describe and evaluate our measurement of rating specific touch actions. 
+
+This document will have 3 segments:  
+
+-Descriptive Statistics  
+
+-Validity Check (Through (Sediment) and Frequency)  
+
+-Explorativ (Role, Specific Touch)
+
+```{r, include=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(knitr)
+library(stringr)
+library(wordcloud)
+
+set.seed(72)
+##Set base directory with input files
+#setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+load("ReduceddataTokens.RData")
+
+#remove irrelevant data frames from global environment
+rm(list = setdiff(ls(), "reduceddata"))
+
+#change the variables classes (numeric, vector)
+reduceddata$rating <- as.numeric(reduceddata$rating)
+
+
+#turn frequency into a factor
+levels_freq <- c("Nie", 
+                 "Seltener als 1 Mal pro Jahr", 
+                 "1-5 Mal pro Jahr", 
+                 "1 Mal pro Monat", 
+                 "1 Mal pro Woche", 
+                 "2-3 Mal pro Woche", 
+                 "Täglich")
+
+reduceddata$frequency3 <- factor(reduceddata$frequency, levels = levels_freq , labels = levels_freq)
+
+#Replace NA values in 'frequency3' column with "Taeglich" to fix a bug
+
+levels(reduceddata$frequency3)[7] <- "Taeglich"
+
+reduceddata$frequency3[is.na(reduceddata$frequency3)] <- "Taeglich"
+
+#Only look at rating and frequency for each touch once
+reduceddata$rating_1 <- ifelse(reduceddata$NumberAdjective == "1",reduceddata$rating, NA)
+
+reduceddata$freq_1 <- ifelse(reduceddata$NumberAdjective == "1", reduceddata$frequency3, NA)
+
+reduceddata$freq_1 <- factor(reduceddata$freq_1, levels = c("1", "2", "3", "4", "5", "6", "7"), labels = c("Nie", 
+                 "Seltener als 1 Mal pro Jahr", 
+                 "1-5 Mal pro Jahr", 
+                 "1 Mal pro Monat", 
+                 "1 Mal pro Woche", 
+                 "2-3 Mal pro Woche", 
+                 "Taeglich"))
+
+reduceddata$Role <- factor(reduceddata$Role, levels = c("active", "passive"), labels = c("active", "passive"))
+
+reduceddata$rating <- as.numeric(reduceddata$rating)
+
+#Split Action into Role and Bodypart
+split_data <- do.call(rbind, strsplit(reduceddata$Action, "\\."))
+reduceddata$ActionOnly <- split_data[, 1]
+reduceddata$Bodypart <- split_data[, 2]
+
+#Correct Typos
+reduceddata$Bodypart<- str_replace(reduceddata$Bodypart, "UpperBac" , "UpperBack")
+reduceddata$Bodypart<- str_replace(reduceddata$Bodypart, "UpperBackk" , "UpperBack")
+reduceddata$Bodypart<- str_replace(reduceddata$Bodypart, "Cheek" , "Cheeks")
+reduceddata$Bodypart<- str_replace(reduceddata$Bodypart, "Cheekss" , "Cheeks")
+
+
+```
+  
+    
+# Summary of Variable and Histogram
+
+Here is an overview over the variable "Rating" and its distribution. 
+
+```{r, echo = FALSE, warning=FALSE}
+summary(reduceddata$rating_1)
+
+ggplot(reduceddata, aes(x = rating_1)) +
+  geom_histogram(binwidth = 0.5) +
+  labs(x = "Rating Scores", Y = "Count")
+
+```
+
+## Validity Check 
+In this section, I want to investigate how well rating actually is related to other concept, to prove its convergent validity. 
+
+1. Frequency
+How is the rating related to Frequency.
+
+```{r, warning=FALSE}
+
+plot(reduceddata$freq_1, col = "lightblue")
+
+ggplot(reduceddata, aes(x = freq_1, y = rating_1)) +
+  geom_violin(na.rm = TRUE, fill = "lightblue") +
+  labs(title = "Ratings by Frequency Category", 
+       x = "Frequency Category", 
+       y = "Rating") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+ggplot(reduceddata, aes(x = freq_1, y = rating_1, fill = Role)) +
+  geom_violin(na.rm = TRUE, position = position_dodge(0.8)) +
+  labs(title = "Ratings by Frequency Category and Role", 
+       x = "Frequency Category", 
+       y = "Rating") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("lightblue", "lightcoral"))
+
+paste("Spearman Correlation of", round(cor(reduceddata$rating_1, as.numeric(reduceddata$freq_1), method = "spearman", use = "complete.obs"), 2), "between Rating and Frequency")
+
+```
+
+The measurement of rating seems valid, as there is a strong relation between Frequency and Rating, as people engage more in touches that are pleasant. A further analysis on rating and sediment could be helpful to verify the validity of rating. A follow-up on this is at the end with word clouds, presenting the "high rated" Adjectives.
+
+# Investigating research relevant variables
+
+In this section, I try to visualize the relationship between the Rating and the variables relevant to our research question (like Role or Specific Touch)
+
+## Rating across Roles
+```{r}
+ggplot(reduceddata, aes(x = Role, y = rating_1)) +
+  geom_boxplot(na.rm = TRUE)
+
+# Calculate descriptive statistics for rating_1 by Role
+descriptives <- reduceddata %>%
+  group_by(Role) %>%
+  summarise(
+    Mean = mean(rating_1, na.rm = TRUE),
+    Median = median(rating_1, na.rm = TRUE),
+    SD = sd(rating_1, na.rm = TRUE),
+    IQR = IQR(rating_1, na.rm = TRUE),
+    Q1 = quantile(rating_1, 0.25, na.rm = TRUE),
+    Q3 = quantile(rating_1, 0.75, na.rm = TRUE),
+    Count = n()
+  )
+
+kable(descriptives, caption = "Rating Scores in the different Roles")
+
+##Wilcox Test 
+wilcox.test(rating_1 ~ Role, data = reduceddata)
+
+```
+
+## Rating across touch situations (Bodypart and Action)
+
+```{r, echo = FALSE, warning=FALSE}
+ggplot(reduceddata, aes(x = Action, y = rating_1)) +
+  geom_boxplot(na.rm = TRUE, fill = "lightblue", color = "black") +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  
+  labs(title = "Distribution of Ratings Across Actions", x = "Action", y = "Rating")
+
+ggplot(reduceddata, aes(x = Bodypart, y = rating_1)) +
+  geom_violin(na.rm = TRUE, fill = "lightyellow", color = "black") +
+  stat_summary(fun = "mean", geom = "point", color = "darkblue", size = 3) +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  
+  labs(title = "Distribution of Ratings Across Bodyparts", x = "Bodypart", y = "Rating")
+
+ggplot(reduceddata, aes(x = ActionOnly, y = rating_1)) +
+  geom_violin(na.rm = TRUE, fill = "lightgreen", color = "black") +
+  stat_summary(fun = "mean", geom = "point", color = "darkblue", size = 3) + 
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  
+  labs(title = "Distribution of Ratings Across ActionOnly", x = "Action", y = "Rating")
+
+
+```
+
+
+## Add-On: Wordclouds based on Rating
+
+To support the validity of the Rating I created 4 Word-Clouds. One for all touches. And then 3 for touches grouped by low, mid and high rating. 
+
+```{r, echo=TRUE, warning=FALSE}
+##Create a Word Cloud 
+general_adj <- (reduceddata$Adjective)
+
+# Subset adjectives for each rating zone
+low_ratings_adj <- reduceddata$Adjective[reduceddata$rating >= -100 & reduceddata$rating_1 <= 20]
+mid_ratings_adj <- reduceddata$Adjective[reduceddata$rating > 20 & reduceddata$rating_1 <= 80]
+high_ratings_adj <- reduceddata$Adjective[reduceddata$rating > 80 & reduceddata$rating_1 <= 100]
+```
+
+## All Ratings 
+
+```{r, echo=FALSE, warning=FALSE}
+
+wordcloud(words = general_adj, 
+         min.freq = 8,  # Minimum frequency of words
+         scale = c(3, 1),  # Size range for words
+         colors = brewer.pal(8, "Dark2")) 
+```
+
+## Low Ratings
+
+```{r, echo=FALSE, warning=FALSE}
+wordcloud(words = low_ratings_adj, 
+         min.freq = 5,  # Minimum frequency of words
+         scale = c(3, 1),  # Size range for words
+         colors = brewer.pal(8, "Blues"))
+```
+
+## Mid Ratings
+
+```{r, echo=FALSE, warning=FALSE}
+wordcloud(words = mid_ratings_adj, 
+         min.freq = 5,  # Minimum frequency of words
+         scale = c(3, 1),  # Size range for words
+         colors = brewer.pal(8, "Greens"))
+```
+
+## High Ratings
+
+```{r, echo=FALSE, warning=FALSE}
+wordcloud(words = high_ratings_adj, 
+         min.freq = 5,  # Minimum frequency of words
+         scale = c(3, 1),  # Size range for words
+         colors = brewer.pal(8, "Oranges")) 
+
+
+
+
+
+```
+
+
